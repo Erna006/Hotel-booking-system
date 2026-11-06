@@ -5,7 +5,8 @@
 `backend/core`, `backend/models`, `backend/middlewares`: настройки, databases, четыре таблицы, роли, JWT и Argon2,
 общие ошибки, журнал запросов, health endpoints, общий запрос пересечений.
 `backend/migrations`: начальная миграция, включая расширение btree_gist.
-Функциональные endpoints ниже — согласованный план реализации, пока не готовые маршруты.
+Функциональные endpoints ниже реализованы в routers. Инструкции сохранены как контракт
+модулей и исходное распределение задач; оно не обозначает авторство коммитов.
 
 Архитектура: async router → бизнес-логика → databases → PostgreSQL.
 Маршруты создавайте в `backend/routers/auth.py`, `users.py`, `rooms.py`, `bookings.py`, `payments.py`.

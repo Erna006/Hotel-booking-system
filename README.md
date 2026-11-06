@@ -1,7 +1,9 @@
 # Hotel Booking System
 
 FastAPI + PostgreSQL + SQLAlchemy Core + databases (asyncpg).
-Готова основа Person 1. Задачи Person 2–5 описаны в [инструкции](docs/TEAM_GUIDE.md).
+Реализованы авторизация, профили и роли, каталог и поиск номеров, бронирования,
+учебная оплата с идемпотентностью и React-интерфейс. Контракт модулей описан в
+[инструкции](docs/TEAM_GUIDE.md).
 
 ## Структура
 
@@ -89,3 +91,66 @@ Remove-Item Env:TEST_DATABASE_URL
 
 Проверяйте сгенерированные миграции вручную, особенно enum и exclusion constraints.
 Новый файл модели импортируйте в backend/models/__init__.py, чтобы таблица попала в общие metadata.
+
+
+## React-интерфейс
+
+Нужен Node.js 22+ и npm. В отдельном терминале из корня проекта:
+
+```bash
+npm ci --prefix frontend
+cp frontend/.env.example frontend/.env
+npm run dev --prefix frontend
+```
+
+Откройте http://localhost:5173. Backend должен работать на http://localhost:8000.
+`VITE_API_BASE_URL` задаётся при сборке; после изменения перезапустите Vite.
+Production-сборка: `npm run build --prefix frontend`, результат — `frontend/dist`.
+Для размещения на другом origin добавьте его в `CORS_ORIGINS` backend.
+Токен хранится только в памяти: перезагрузка страницы требует повторного входа.
+Оплата — симуляция успеха или отказа; реальные деньги и реквизиты карт не используются.
+При сетевой ошибке повтор платежа использует прежний ключ; после полученного результата
+новая попытка получает новый UUID.
+
+## Первый администратор
+
+После миграций запустите локально:
+
+```bash
+.venv/bin/python -m backend.create_admin
+```
+
+В Windows используйте `.\.venv\Scripts\python.exe -m backend.create_admin`.
+Email и имя вводятся в терминале, пароль вводится скрыто и подтверждается.
+Публичная регистрация всегда создаёт гостя. Администратор создаёт номера во вкладке
+«Номера» и управляет ролями во вкладке «Пользователи». Последнего активного
+администратора нельзя отключить или понизить через API.
+
+## Запуск на Linux/macOS
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r backend/requirements.lock.txt
+cp .env.example .env
+```
+
+Сгенерируйте `JWT_SECRET` командой из раздела установки и замените шаблон в `.env`.
+
+```bash
+docker compose up -d db
+.venv/bin/python -m alembic -c backend/alembic.ini upgrade head
+.venv/bin/python -m uvicorn backend.main:app --reload
+```
+
+Для API-тестов используется отдельная база:
+
+```bash
+docker compose exec -T db createdb -U hotel hotel_test
+POSTGRES_URL=postgresql+asyncpg://hotel:hotel@127.0.0.1:15432/hotel_test .venv/bin/python -m alembic -c backend/alembic.ini upgrade head
+TEST_DATABASE_URL=postgresql+asyncpg://hotel:hotel@127.0.0.1:15432/hotel_test .venv/bin/python -m pytest -q
+```
+
+Проверка реализации: 30 тестов прошли на PostgreSQL 17; React production build прошёл.
+Проверены регистрация, защита ролей, блокировка аккаунта, последний admin, даты и деньги,
+поиск, конкурентная бронь, владение, неудачная и успешная оплата, повтор ключа,
+история и гонка отмены с оплатой. Визуальная проверка в браузере в этой среде не выполнена.
