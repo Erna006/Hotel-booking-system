@@ -9,6 +9,13 @@ from starlette.exceptions import HTTPException
 logger = logging.getLogger("hotel.api")
 
 
+class ApiError(HTTPException):
+    def __init__(self, status_code: int, code: str, message: str):
+        super().__init__(status_code, message)
+        self.code = code
+
+
+
 def error_response(request: Request, status: int, code: str, message: str, headers=None):
     request_id = getattr(request.state, "request_id", None)
     response_headers = dict(headers or {})
@@ -22,7 +29,7 @@ def error_response(request: Request, status: int, code: str, message: str, heade
 
 
 async def http_error(request: Request, exc: HTTPException):
-    return error_response(request, exc.status_code, f"http_{exc.status_code}", str(exc.detail), exc.headers)
+    return error_response(request, exc.status_code, getattr(exc, "code", f"http_{exc.status_code}"), str(exc.detail), exc.headers)
 
 
 async def validation_error(request: Request, exc: RequestValidationError):

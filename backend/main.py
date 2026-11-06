@@ -38,4 +38,7 @@ app.middleware("http")(request_logging)
 register_error_handlers(app)
 app.include_router(health_router)
 
-# Persons 2–4 add routers here with prefix="/api/v1".
+from backend.routers import auth, users, rooms, bookings, payments
+
+for module in (auth, users, rooms, bookings, payments):
+    app.include_router(module.router, prefix="/api/v1")
