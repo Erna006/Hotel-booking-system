@@ -5,6 +5,57 @@ FastAPI + PostgreSQL + SQLAlchemy Core + databases (asyncpg).
 учебная оплата с идемпотентностью и React-интерфейс. Контракт модулей описан в
 [инструкции](docs/TEAM_GUIDE.md).
 
+## Запуск всего проекта через Docker Compose
+
+Нужен Docker с Compose v2. Все команды выполняются из корня проекта.
+Скопируйте `.env.example` в `.env` (`cp .env.example .env` в Linux/macOS,
+`Copy-Item .env.example .env` в PowerShell). Сгенерируйте секрет:
+
+```bash
+docker run --rm python:3.14-slim python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+Вставьте результат в `JWT_SECRET` файла `.env`. Существующий приватный секрет сохраните.
+Затем запустите **базу, миграции, backend и frontend** одной командой:
+
+```bash
+docker compose up -d --build
+```
+
+- Интерфейс: http://localhost:5173
+- API / Swagger: http://localhost:8000/docs
+- Готовность API: http://localhost:8000/health/ready
+
+Если порт занят, задайте `BACKEND_PORT` и/или `FRONTEND_PORT` в `.env`
+(например, `BACKEND_PORT=18000`) и повторите запуск. Используйте выбранный порт в URL.
+
+Compose ждёт готовности PostgreSQL, применяет миграции отдельным сервисом `migrate`,
+затем запускает API и Nginx с собранным React. Состояние `Exited (0)` у `migrate` нормально.
+Frontend обращается к `/api/v1` через Nginx; URL backend в браузере настраивать не нужно.
+Внутри контейнеров backend использует `db:5432`, независимо от `POSTGRES_URL` в `.env`,
+который предназначен для запуска Python на хосте. Данные PostgreSQL сохраняются в томе `hotel_data`.
+Python и Node.js на хосте для этого способа запуска не нужны.
+
+Первый администратор (интерактивный ввод имени, email и пароля):
+
+```bash
+docker compose exec backend python -m backend.create_admin
+```
+
+Управление:
+
+```bash
+docker compose ps -a
+docker compose logs -f backend frontend migrate
+docker compose down
+```
+
+`down` останавливает проект, сохраняя базу. После изменения кода снова выполните
+`docker compose up -d --build`; исходники включаются в образы при сборке.
+Порты опубликованы только на loopback локального компьютера.
+
+Ниже описан альтернативный запуск для разработки с Python и Node.js на хосте.
+
 ## Структура
 
 ```text
