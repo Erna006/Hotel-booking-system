@@ -1,9 +1,11 @@
 from datetime import datetime, timedelta, timezone
 
+import asyncpg
 import sqlalchemy as sa
 from fastapi import APIRouter, HTTPException, Response
 from starlette.concurrency import run_in_threadpool
 from backend.core.config import conf
+from backend.core.errors import ApiError
 from backend.models import Guests
 from backend.models.refresh_tokens import RefreshTokens
 from backend.middlewares.tokens import (
@@ -24,9 +26,13 @@ def _expires():
 @router.post('/register', status_code=201, response_model=Profile)
 async def register(body: Register, db: DB):
     encoded = await run_in_threadpool(hash_password, body.password)
-    return dict(await db.fetch_one(Guests.insert().values(
-        email=body.email, full_name=body.full_name, password_hash=encoded,
-        role='guest').returning(*Guests.c)))
+    try:
+        row = await db.fetch_one(Guests.insert().values(
+            email=body.email, full_name=body.full_name, password_hash=encoded,
+            role='guest').returning(*Guests.c))
+    except asyncpg.UniqueViolationError:
+        raise ApiError(409, 'email_taken', 'Email is already registered')
+    return dict(row)
 
 
 @router.post('/login', response_model=Token)

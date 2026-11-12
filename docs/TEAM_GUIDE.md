@@ -60,7 +60,7 @@ JWT хранит sub=UUID; роль и is_active всегда читаются �
    из `backend.middlewares.tokens`.
 2. Создайте отдельные Pydantic request/response schemas, response никогда не включает password_hash.
 3. Регистрация принимает только email/password/full_name, нормализует email, проверяет формат,
-   пароль минимум 12 символов, максимум 128. Назначает исключительно guest, не принимает role/is_active.
+   пароль минимум 8 символов, максимум 128. Назначает исключительно guest, не принимает role/is_active.
 4. Login: единая ошибка 401 для неверного email/пароля и неактивного аккаунта.
 5. Профиль: PATCH позволяет только full_name/email; изменение роли — отдельный admin endpoint.
 6. Не допускайте отключения/понижения последнего активного admin. Первого admin создайте отдельной
@@ -119,8 +119,8 @@ JWT хранит sub=UUID; роль и is_active всегда читаются �
 
 | Метод и путь /api/v1 | Доступ / данные |
 | --- | --- |
-| POST /bookings | авторизованный: room_id, check_in, check_out → 201 бронь текущего пользователя |
-| GET /bookings | свои для guest, все для staff; limit, offset |
+| POST /bookings | авторизованный: room_id, check_in, check_out, необязательный guest_count → 201 бронь текущего пользователя |
+| GET /bookings | свои для guest, все для staff; limit, offset; данные номера и guest_count (null для старых броней) |
 | GET /bookings/{id} | владелец или staff |
 | POST /bookings/{id}/cancel | владелец или staff; повтор отмены возвращает cancelled |
 | POST /bookings/{id}/payments | владелец: outcome + Idempotency-Key → Payment и booking_status |
@@ -130,7 +130,7 @@ JWT хранит sub=UUID; роль и is_active всегда читаются �
 
 1. Создайте Vite React приложение в `frontend/`, API base URL через VITE_API_BASE_URL.
 2. Реализуйте страницы из задания и единый API client, Bearer заголовок, обработку 401/403/409/422.
-3. Токен держите в памяти (после перезагрузки повторный вход); отображение панели по роли не заменяет backend RBAC.
+3. Токен хранится в `sessionStorage` для восстановления сессии в той же вкладке. Права проверяет backend.
 4. Передавайте даты без конвертации через UTC; деньги отображайте как сумму с валютой.
 5. В поиске и оплате показывайте loading и ошибки. При 409 предложите обновить поиск.
 6. На одну попытку оплаты создавайте crypto.randomUUID(); сетевой retry использует тот же ключ.
