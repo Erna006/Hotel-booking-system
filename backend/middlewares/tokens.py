@@ -1,3 +1,5 @@
+import hashlib
+import secrets
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -39,3 +41,11 @@ def read_access_token(token: str) -> UUID:
         options={"require": ["sub", "exp", "iat", "iss", "aud"]},
     )
     return UUID(payload["sub"])
+def new_refresh_token() -> tuple[str, str]:
+    raw = secrets.token_urlsafe(48)
+    return raw, hash_refresh_token(raw)
+
+
+def hash_refresh_token(raw: str) -> str:
+    # Random 384-bit token: a fast hash is enough (no brute force), unlike passwords.
+    return hashlib.sha256(raw.encode()).hexdigest()
