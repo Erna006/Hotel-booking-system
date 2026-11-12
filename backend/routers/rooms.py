@@ -1,8 +1,10 @@
 from datetime import date
 from decimal import Decimal
 from uuid import UUID
+import asyncpg
 import sqlalchemy as sa
 from fastapi import APIRouter, HTTPException, Query, Depends, Request
+from backend.core.errors import ApiError
 from backend.models import Rooms
 from backend.models.availability import overlapping_bookings
 from backend.middlewares.auth import get_current_user, bearer
@@ -64,17 +66,24 @@ async def room(room_id: UUID, db: DB):
 
 @router.post('', status_code=201, response_model=Room)
 async def create(body: RoomCreate, db: DB, admin: Admin):
-    return dict(await db.fetch_one(Rooms.insert().values(**body.model_dump()).returning(*Rooms.c)))
+    try:
+        row = await db.fetch_one(Rooms.insert().values(**body.model_dump()).returning(*Rooms.c))
+    except asyncpg.UniqueViolationError:
+        raise ApiError(409, 'room_number_taken', 'Room number already exists')
+    return dict(row)
 
 
 @router.patch('/{room_id}', response_model=Room)
 async def update(room_id: UUID, body: RoomPatch, db: DB, admin: Admin):
-    async with db.transaction():
-        row = await db.fetch_one(sa.select(Rooms).where(Rooms.c.id == room_id).with_for_update())
-        if not row:
-            raise HTTPException(404, 'Room not found')
-        changes = body.model_dump(exclude_unset=True)
-        if not changes:
-            return dict(row)
-        return dict(await db.fetch_one(Rooms.update().where(Rooms.c.id == room_id)
-            .values(**changes).returning(*Rooms.c)))
+    try:
+        async with db.transaction():
+            row = await db.fetch_one(sa.select(Rooms).where(Rooms.c.id == room_id).with_for_update())
+            if not row:
+                raise HTTPException(404, 'Room not found')
+            changes = body.model_dump(exclude_unset=True)
+            if not changes:
+                return dict(row)
+            return dict(await db.fetch_one(Rooms.update().where(Rooms.c.id == room_id)
+                .values(**changes).returning(*Rooms.c)))
+    except asyncpg.UniqueViolationError:
+        raise ApiError(409, 'room_number_taken', 'Room number already exists')
