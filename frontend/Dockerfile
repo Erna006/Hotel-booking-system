@@ -4,6 +4,7 @@ COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/index.html ./
 COPY frontend/src ./src
+COPY frontend/public ./public
 ENV VITE_API_BASE_URL=/api/v1
 RUN npm run build
 

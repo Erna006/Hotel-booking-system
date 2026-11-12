@@ -26,6 +26,15 @@ docker compose up -d --build
 - API / Swagger: http://localhost:8000/docs
 - Готовность API: http://localhost:8000/health/ready
 
+Чтобы заполнить пустой каталог шестью демонстрационными номерами, выполните в PowerShell:
+
+```powershell
+Get-Content backend/demo_rooms.sql -Raw | docker compose exec -T db psql -U hotel -d hotel -v ON_ERROR_STOP=1
+```
+
+В Bash передайте файл через перенаправление `< backend/demo_rooms.sql`. Повторный запуск
+пропускает номера, которые уже есть в каталоге.
+
 Если порт занят, задайте `BACKEND_PORT` и/или `FRONTEND_PORT` в `.env`
 (например, `BACKEND_PORT=18000`) и повторите запуск. Используйте выбранный порт в URL.
 
@@ -158,7 +167,7 @@ npm run dev --prefix frontend
 `VITE_API_BASE_URL` задаётся при сборке; после изменения перезапустите Vite.
 Production-сборка: `npm run build --prefix frontend`, результат — `frontend/dist`.
 Для размещения на другом origin добавьте его в `CORS_ORIGINS` backend.
-Токен хранится только в памяти: перезагрузка страницы требует повторного входа.
+Токен хранится в `sessionStorage`. После перезагрузки вкладки профиль восстанавливается, пока действует токен.
 Оплата — симуляция успеха или отказа; реальные деньги и реквизиты карт не используются.
 При сетевой ошибке повтор платежа использует прежний ключ; после полученного результата
 новая попытка получает новый UUID.

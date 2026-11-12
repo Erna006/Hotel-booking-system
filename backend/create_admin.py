@@ -27,5 +27,7 @@ if __name__ == '__main__':
     if password != getpass('Confirm password: '):
         raise SystemExit('Passwords do not match')
     data = Register(email=email, full_name=name, password=password)
+    if len(data.password) < 12:
+        raise SystemExit('Administrator password must have at least 12 characters')
     asyncio.run(create(data))
     print('Administrator created')

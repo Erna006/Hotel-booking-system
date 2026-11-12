@@ -7,7 +7,7 @@ from backend.models import Rooms, Bookings
 from backend.models.availability import overlapping_bookings
 from backend.middlewares.auth import require_booking_access
 from backend.routers.common import DB, User, Limit, Offset, page
-from backend.schemas import Booking, BookingCreate, Page
+from backend.schemas import Booking, BookingCreate, BookingSummary, Page
 
 router = APIRouter(prefix='/bookings', tags=['bookings'])
 
@@ -29,6 +29,8 @@ async def create(body: BookingCreate, db: DB, user: User):
         room = await db.fetch_one(sa.select(Rooms).where(Rooms.c.id == body.room_id).with_for_update())
         if not room or not room['is_active']:
             raise HTTPException(404, 'Room not found')
+        if body.guest_count is not None and body.guest_count > room['capacity']:
+            raise HTTPException(422, 'Guest count exceeds room capacity')
         if await db.fetch_one(overlapping_bookings(body.room_id, body.check_in, body.check_out)):
             raise ApiError(409, 'room_unavailable', 'Room unavailable for these dates')
         amount = room['price_per_night'] * (body.check_out - body.check_in).days
@@ -39,9 +41,12 @@ async def create(body: BookingCreate, db: DB, user: User):
             currency=room['currency'], status='pending').returning(*Bookings.c)))
 
 
-@router.get('', response_model=Page[Booking])
+@router.get('', response_model=Page[BookingSummary])
 async def bookings(db: DB, user: User, limit: Limit = 20, offset: Offset = 0):
-    query = sa.select(Bookings)
+    query = sa.select(
+        Bookings, Rooms.c.number.label('room_number'), Rooms.c.room_type,
+        Rooms.c.capacity.label('room_capacity'),
+    ).join_from(Bookings, Rooms)
     if user['role'] == 'guest':
         query = query.where(Bookings.c.guest_id == user['id'])
     return await page(db, query.order_by(Bookings.c.created_at.desc(), Bookings.c.id), limit, offset)

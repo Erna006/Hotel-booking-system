@@ -1,16 +1,63 @@
 const base = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
+const tokenKey = 'qonaq.access-token';
 let token = null;
-export function setToken(value) { token = value; }
-export async function api(path, {method = 'GET', body, key} = {}) {
-  const response = await fetch(`${base}${path}`, {
-    method, headers: {'Content-Type': 'application/json', ...(token ? {Authorization: `Bearer ${token}`} : {}), ...(key ? {'Idempotency-Key': key} : {})},
-    ...(body !== undefined ? {body: JSON.stringify(body)} : {})
-  });
-  const data = await response.json();
-  if (!response.ok) {
-    if (response.status === 401 && token) window.dispatchEvent(new Event('session-expired'));
-    const text = {401: 'Войдите в аккаунт заново.', 403: 'Недостаточно прав.', 409: 'Данные изменились или возник конфликт. Обновите поиск.', 422: 'Проверьте введённые данные.'}[response.status];
-    throw new Error(text || data.error?.message || 'Не удалось выполнить запрос');
+try {
+  token = window.sessionStorage.getItem(tokenKey);
+} catch {
+  // The current page can still use an in-memory session when storage is unavailable.
+}
+
+export function hasToken() {
+  return Boolean(token);
+}
+
+export function setToken(value) {
+  token = value;
+  try {
+    if (value) window.sessionStorage.setItem(tokenKey, value);
+    else window.sessionStorage.removeItem(tokenKey);
+  } catch {
+    // Storage can be blocked by the browser.
   }
+}
+
+function errorMessage(path, status, code) {
+  if (path === '/auth/login' && status === 401) return 'Проверьте почту и пароль и попробуйте снова.';
+  if (path === '/auth/register' && code === 'data_conflict') return 'Аккаунт с такой почтой уже есть. Войдите в него.';
+  if (code === 'room_unavailable') return 'Этот номер уже занят на выбранные даты. Закройте окно и обновите поиск.';
+  return {
+    401: 'Сессия закончилась. Войдите снова.',
+    403: 'Для этого действия недостаточно прав.',
+    404: 'Запись больше недоступна. Обновите страницу.',
+    409: 'Данные изменились. Обновите список и повторите действие.',
+    422: 'Проверьте введённые данные.',
+  }[status] || 'Не удалось выполнить запрос. Попробуйте ещё раз.';
+}
+
+export async function api(path, {method = 'GET', body, key, signal} = {}) {
+  const requestToken = token;
+  let response;
+  try {
+    response = await fetch(`${base}${path}`, {
+      method,
+      signal,
+      headers: {
+        ...(body !== undefined ? {'Content-Type': 'application/json'} : {}),
+        ...(requestToken ? {Authorization: `Bearer ${requestToken}`} : {}),
+        ...(key ? {'Idempotency-Key': key} : {}),
+      },
+      ...(body !== undefined ? {body: JSON.stringify(body)} : {}),
+    });
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    throw new Error('Сервер недоступен. Проверьте соединение и попробуйте снова.');
+  }
+
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    if (response.status === 401 && !signal?.aborted && requestToken && token === requestToken) window.dispatchEvent(new Event('session-expired'));
+    throw new Error(errorMessage(path, response.status, data?.error?.code));
+  }
+  if (data === null) throw new Error('Сервер вернул неожиданный ответ. Попробуйте снова.');
   return data;
 }

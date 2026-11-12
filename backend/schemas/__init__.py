@@ -27,7 +27,7 @@ class EmailInput(Input):
 
 
 class Register(EmailInput):
-    password: str = Field(min_length=12, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
     full_name: str = Field(min_length=1, max_length=200)
 
 
@@ -103,6 +103,11 @@ class AvailableRoom(Room):
     total_amount: Decimal
 
 
+class StayPrice(BaseModel):
+    currency: str
+    total_amount: Decimal
+
+
 def validate_dates(check_in, check_out):
     if check_out <= check_in or check_in < datetime.now(ZoneInfo('Asia/Qyzylorda')).date():
         raise ValueError('Dates must be future dates spanning at least one night')
@@ -112,6 +117,7 @@ class BookingCreate(Input):
     room_id: UUID
     check_in: date
     check_out: date
+    guest_count: int | None = Field(default=None, ge=1, le=2147483647)
 
     @model_validator(mode='after')
     def valid_dates(self):
@@ -125,10 +131,17 @@ class Booking(BaseModel):
     room_id: UUID
     check_in: date
     check_out: date
+    guest_count: int | None = None
     status: str
     total_amount: Decimal
     currency: str
     created_at: datetime
+
+
+class BookingSummary(Booking):
+    room_number: str
+    room_type: str
+    room_capacity: int
 
 
 class PaymentCreate(Input):

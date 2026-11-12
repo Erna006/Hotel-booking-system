@@ -41,17 +41,46 @@ async def api_env():
                 await db.execute(Guests.delete().where(Guests.c.id.in_(list(ids.values()))))
 
 
-async def reserve(client, headers, room, start='2030-06-01', end='2030-06-03'):
+async def reserve(client, headers, room, start='2030-06-01', end='2030-06-03', **fields):
     return await client.post('/api/v1/bookings', headers=headers, json={
-        'room_id': str(room), 'check_in': start, 'check_out': end})
+        'room_id': str(room), 'check_in': start, 'check_out': end, **fields})
+
+
+async def test_availability_for_selected_room(api_env):
+    client, _, _, headers, room = api_env
+    query = {'check_in': '2030-06-01', 'check_out': '2030-06-03', 'room_id': str(room)}
+    path = '/api/v1/rooms/available'
+
+    result = (await client.get(path, params=query)).json()
+    assert result['total'] == 1
+    assert result['items'][0]['id'] == str(room)
+    assert result['items'][0]['total_amount'] == '30000.00'
+    prices = '/api/v1/rooms/available/prices'
+    assert (await client.get(prices, params=query)).json() == [
+        {'currency': 'KZT', 'total_amount': '30000.00'},
+    ]
+    assert (await client.get(path, params={**query, 'room_id': str(uuid4())})).json()['total'] == 0
+    assert (await client.get(path, params={**query, 'capacity': 3})).json()['total'] == 0
+
+    legacy = await reserve(client, headers['guest'], room)
+    assert legacy.status_code == 201
+    assert legacy.json()['guest_count'] is None
+    assert (await client.get(path, params=query)).json()['total'] == 0
+    assert (await client.get(prices, params=query)).json() == []
 
 
 async def test_booking_payment_lifecycle_and_ownership(api_env):
     client, db, ids, headers, room = api_env
-    response = await reserve(client, headers['guest'], room)
+    assert (await reserve(client, headers['guest'], room, guest_count=3)).status_code == 422
+    response = await reserve(client, headers['guest'], room, guest_count=2)
     assert response.status_code == 201, response.text
     booking = response.json()
     assert booking['total_amount'] == '30000.00'
+    summary = (await client.get('/api/v1/bookings', headers=headers['guest'])).json()['items'][0]
+    assert summary['guest_count'] == 2
+    assert summary['room_number'] == str(room)[:20]
+    assert summary['room_type'] == 'test'
+    assert summary['room_capacity'] == 2
     bid = booking['id']
     assert (await client.get(f'/api/v1/bookings/{bid}', headers=headers['other'])).status_code == 404
     assert (await client.get('/api/v1/bookings', headers=headers['other'])).json()['total'] == 0
@@ -100,7 +129,8 @@ async def test_auth_and_admin_protection(api_env):
     uid = uuid4()
     email = f'{uid}@example.com'
     try:
-        body = dict(email=f' {email.upper()} ', password='api-test-password', full_name='New User')
+        body = dict(email=f' {email.upper()} ', password='Test1234', full_name='New User')
+        assert (await client.post('/api/v1/auth/register', json={**body, 'password': 'Test123'})).status_code == 422
         result = await client.post('/api/v1/auth/register', json=body)
         assert result.status_code == 201, result.text
         assert result.json()['email'] == email
