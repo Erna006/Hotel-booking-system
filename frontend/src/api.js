@@ -23,7 +23,11 @@ export function setToken(value) {
 
 function errorMessage(path, status, code) {
   if (path === '/auth/login' && status === 401) return 'Проверьте почту и пароль и попробуйте снова.';
-  if (path === '/auth/register' && code === 'data_conflict') return 'Аккаунт с такой почтой уже есть. Войдите в него.';
+  if (code === 'email_taken' || (path === '/auth/register' && code === 'data_conflict')) {
+    return 'Аккаунт с такой почтой уже есть.';
+  }
+  if (code === 'room_number_taken') return 'Комната с таким номером уже существует.';
+  if (code === 'self_change_forbidden') return 'Нельзя изменить свою роль или отключить собственный аккаунт.';
   if (code === 'room_unavailable') return 'Этот номер уже занят на выбранные даты. Закройте окно и обновите поиск.';
   return {
     401: 'Сессия закончилась. Войдите снова.',

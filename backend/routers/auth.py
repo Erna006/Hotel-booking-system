@@ -1,6 +1,8 @@
+import asyncpg
 import sqlalchemy as sa
 from fastapi import APIRouter, HTTPException
 from starlette.concurrency import run_in_threadpool
+from backend.core.errors import ApiError
 from backend.models import Guests
 from backend.middlewares.tokens import hash_password, verify_password, create_access_token
 from backend.routers.common import DB
@@ -14,9 +16,13 @@ DUMMY_HASH = hash_password('unusable-dummy-login-password')
 @router.post('/register', status_code=201, response_model=Profile)
 async def register(body: Register, db: DB):
     encoded = await run_in_threadpool(hash_password, body.password)
-    return dict(await db.fetch_one(Guests.insert().values(
-        email=body.email, full_name=body.full_name, password_hash=encoded,
-        role='guest').returning(*Guests.c)))
+    try:
+        row = await db.fetch_one(Guests.insert().values(
+            email=body.email, full_name=body.full_name, password_hash=encoded,
+            role='guest').returning(*Guests.c))
+    except asyncpg.UniqueViolationError:
+        raise ApiError(409, 'email_taken', 'Email is already registered')
+    return dict(row)
 
 
 @router.post('/login', response_model=Token)
