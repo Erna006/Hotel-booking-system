@@ -12,6 +12,8 @@ from backend.main import app
 from backend.models import Role
 from backend.middlewares.tokens import create_access_token, hash_password, verify_password
 from backend.middlewares.auth import get_current_user, require_roles, require_booking_access
+from backend.middlewares.tokens import (create_access_token, hash_password, verify_password,
+                                        new_refresh_token, hash_refresh_token)
 
 
 class FakeDB:

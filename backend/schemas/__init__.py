@@ -69,6 +69,10 @@ class Profile(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str = 'bearer'
+    refresh_token: str | None = None
+
+class RefreshRequest(Input):
+    refresh_token: str = Field(min_length=20, max_length=200)
 
 
 class RoomCreate(Input):

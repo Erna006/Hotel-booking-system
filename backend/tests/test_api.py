@@ -9,8 +9,9 @@ import pytest_asyncio
 import sqlalchemy as sa
 from backend.core.db import get_session
 from backend.main import app
-from backend.models import Guests, Rooms, Bookings, Payments
-from backend.middlewares.tokens import create_access_token, hash_password
+from backend.models import Guests, Rooms, Bookings, Payments, RefreshTokens
+from backend.middlewares.tokens import create_access_token, hash_password, hash_refresh_token
+from datetime import datetime, timedelta, timezone
 
 
 @pytest_asyncio.fixture
@@ -38,6 +39,7 @@ async def api_env():
                 await db.execute(Payments.delete().where(Payments.c.booking_id.in_(bids)))
                 await db.execute(Bookings.delete().where(Bookings.c.guest_id.in_(list(ids.values()))))
                 await db.execute(Rooms.delete().where(Rooms.c.id == room_id))
+                await db.execute(RefreshTokens.delete().where(RefreshTokens.c.guest_id.in_(list(ids.values()))))
                 await db.execute(Guests.delete().where(Guests.c.id.in_(list(ids.values()))))
 
 
@@ -152,6 +154,8 @@ async def test_auth_and_admin_protection(api_env):
         assert result.status_code == 200, result.text
         assert (await client.get('/api/v1/users', headers=headers['other'])).status_code == 200
     finally:
+        await db.execute(RefreshTokens.delete().where(RefreshTokens.c.guest_id.in_(
+            sa.select(Guests.c.id).where(Guests.c.email == email))))
         await db.execute(Guests.delete().where(Guests.c.email == email))
 
 
@@ -165,6 +169,81 @@ async def test_payment_cancel_race(api_env):
     assert cancel.status_code == 200
     assert pay.status_code in (200,409)
     assert (await client.get(path,headers=headers['guest'])).json()['status'] == 'cancelled'
+
+
+async def login_as(client, uid):
+    response = await client.post('/api/v1/auth/login', json={
+        'email': f'{uid}@example.com', 'password': 'api-test-password'})
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def refresh(client, token):
+    return client.post('/api/v1/auth/refresh', json={'refresh_token': token})
+
+
+async def test_refresh_rotation_and_reuse_detection(api_env):
+    client, db, ids, headers, room = api_env
+    first = await login_as(client, ids['guest'])
+    stored = await db.fetch_all(sa.select(RefreshTokens.c.token_hash)
+                                .where(RefreshTokens.c.guest_id == ids['guest']))
+    assert [r['token_hash'] for r in stored] == [hash_refresh_token(first['refresh_token'])]
+    assert first['refresh_token'] != stored[0]['token_hash']
+
+    rotated = await refresh(client, first['refresh_token'])
+    assert rotated.status_code == 200, rotated.text
+    second = rotated.json()
+    assert second['refresh_token'] != first['refresh_token']
+    me = await client.get('/api/v1/users/me', headers={'Authorization': f"Bearer {second['access_token']}"})
+    assert me.status_code == 200
+
+    # Replaying the rotated token is treated as theft: the whole family is revoked.
+    assert (await refresh(client, first['refresh_token'])).status_code == 401
+    assert (await refresh(client, second['refresh_token'])).status_code == 401
+    active = await db.fetch_val(sa.select(sa.func.count()).select_from(RefreshTokens).where(
+        RefreshTokens.c.guest_id == ids['guest'], RefreshTokens.c.revoked_at.is_(None)))
+    assert active == 0
+
+
+async def test_refresh_rejects_unknown_and_malformed(api_env):
+    client, *_ = api_env
+    assert (await refresh(client, 'x' * 64)).status_code == 401
+    assert (await refresh(client, 'short')).status_code == 422
+    assert (await client.post('/api/v1/auth/refresh', json={})).status_code == 422
+
+
+async def test_refresh_expired_token(api_env):
+    client, db, ids, headers, room = api_env
+    token = (await login_as(client, ids['guest']))['refresh_token']
+    await db.execute(RefreshTokens.update().where(RefreshTokens.c.guest_id == ids['guest'])
+                     .values(expires_at=datetime.now(timezone.utc) - timedelta(days=1)))
+    assert (await refresh(client, token)).status_code == 401
+
+
+async def test_refresh_disabled_account(api_env):
+    client, db, ids, headers, room = api_env
+    token = (await login_as(client, ids['other']))['refresh_token']
+    await db.execute(Guests.update().where(Guests.c.id == ids['other']).values(is_active=False))
+    assert (await refresh(client, token)).status_code == 401
+    unused = await db.fetch_val(sa.select(sa.func.count()).select_from(RefreshTokens).where(
+        RefreshTokens.c.guest_id == ids['other'], RefreshTokens.c.revoked_at.is_(None)))
+    assert unused == 1  # no rotation happened for a disabled account
+
+
+async def test_logout_revokes_refresh_token(api_env):
+    client, db, ids, headers, room = api_env
+    token = (await login_as(client, ids['guest']))['refresh_token']
+    assert (await client.post('/api/v1/auth/logout', json={'refresh_token': token})).status_code == 204
+    assert (await client.post('/api/v1/auth/logout', json={'refresh_token': token})).status_code == 204
+    assert (await client.post('/api/v1/auth/logout', json={'refresh_token': 'x' * 64})).status_code == 204
+    assert (await refresh(client, token)).status_code == 401
+
+
+async def test_concurrent_refresh_allows_single_winner(api_env):
+    client, db, ids, headers, room = api_env
+    token = (await login_as(client, ids['guest']))['refresh_token']
+    results = await asyncio.gather(refresh(client, token), refresh(client, token))
+    assert sorted(r.status_code for r in results) == [200, 401]
 
 
 # ---------------------------------------------------------------------------
