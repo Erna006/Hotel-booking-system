@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     jwt_issuer: str = "hotel-booking"
     jwt_audience: str = "hotel-api"
     access_token_minutes: int = Field(default=30, ge=1, le=1440)
+    refresh_token_days: int = Field(default=7, ge=1, le=90)
     cors_origins: list[str] = ["http://localhost:5173"]
     log_level: str = "INFO"
 

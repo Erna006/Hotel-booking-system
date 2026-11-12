@@ -42,6 +42,7 @@ Bookings = sqlalchemy.Table(
         server_default='pending',
         nullable=False,
     ),
+    sqlalchemy.Column('guest_count', sqlalchemy.Integer(), nullable=True),
     sqlalchemy.Column(
         'total_amount',
         sqlalchemy.Numeric(precision=12, scale=2),
@@ -67,6 +68,7 @@ Bookings = sqlalchemy.Table(
         'total_amount > 0',
         name='ck_booking_amount',
     ),
+    sqlalchemy.CheckConstraint('guest_count > 0', name='ck_booking_guest_count'),
     sqlalchemy.CheckConstraint(
         "currency ~ '^[A-Z]{3}$'",
         name='ck_booking_currency',

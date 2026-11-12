@@ -1,13 +1,15 @@
 from datetime import date
 from decimal import Decimal
 from uuid import UUID
+import asyncpg
 import sqlalchemy as sa
 from fastapi import APIRouter, HTTPException, Query, Depends, Request
+from backend.core.errors import ApiError
 from backend.models import Rooms
 from backend.models.availability import overlapping_bookings
 from backend.middlewares.auth import get_current_user, bearer
 from backend.routers.common import DB, Admin, Limit, Offset, page
-from backend.schemas import Room, AvailableRoom, RoomCreate, RoomPatch, Page, validate_dates
+from backend.schemas import Room, AvailableRoom, StayPrice, RoomCreate, RoomPatch, Page, validate_dates
 
 router = APIRouter(prefix='/rooms', tags=['rooms'])
 
@@ -40,9 +42,8 @@ async def rooms(request: Request, db: DB, limit: Limit = 20, offset: Offset = 0,
         .order_by(Rooms.c.number, Rooms.c.id), limit, offset)
 
 
-@router.get('/available', response_model=Page[AvailableRoom])
-async def available(check_in: date, check_out: date, db: DB, limit: Limit = 20,
-                    offset: Offset = 0, conditions=Depends(filters)):
+def available_query(check_in: date, check_out: date, room_id: UUID | None = None,
+                    conditions=Depends(filters)):
     try:
         validate_dates(check_in, check_out)
     except ValueError as exc:
@@ -50,8 +51,22 @@ async def available(check_in: date, check_out: date, db: DB, limit: Limit = 20,
     overlaps = overlapping_bookings(Rooms.c.id, check_in, check_out).correlate(Rooms)
     query = sa.select(Rooms, (Rooms.c.price_per_night * (check_out - check_in).days)
         .label('total_amount')).where(*conditions, Rooms.c.is_active.is_(True),
-        ~overlaps.exists()).order_by(Rooms.c.number, Rooms.c.id)
-    return await page(db, query, limit, offset)
+        ~overlaps.exists())
+    if room_id is not None:
+        query = query.where(Rooms.c.id == room_id)
+    return query
+
+
+@router.get('/available', response_model=Page[AvailableRoom])
+async def available(db: DB, limit: Limit = 20, offset: Offset = 0, query=Depends(available_query)):
+    return await page(db, query.order_by(Rooms.c.number, Rooms.c.id), limit, offset)
+
+
+@router.get('/available/prices', response_model=list[StayPrice])
+async def available_prices(db: DB, query=Depends(available_query)):
+    rooms = query.subquery()
+    totals = sa.select(rooms.c.currency, sa.func.min(rooms.c.total_amount).label('total_amount'))
+    return [dict(row) for row in await db.fetch_all(totals.group_by(rooms.c.currency).order_by(rooms.c.currency))]
 
 
 @router.get('/{room_id}', response_model=Room)
@@ -64,17 +79,24 @@ async def room(room_id: UUID, db: DB):
 
 @router.post('', status_code=201, response_model=Room)
 async def create(body: RoomCreate, db: DB, admin: Admin):
-    return dict(await db.fetch_one(Rooms.insert().values(**body.model_dump()).returning(*Rooms.c)))
+    try:
+        row = await db.fetch_one(Rooms.insert().values(**body.model_dump()).returning(*Rooms.c))
+    except asyncpg.UniqueViolationError:
+        raise ApiError(409, 'room_number_taken', 'Room number already exists')
+    return dict(row)
 
 
 @router.patch('/{room_id}', response_model=Room)
 async def update(room_id: UUID, body: RoomPatch, db: DB, admin: Admin):
-    async with db.transaction():
-        row = await db.fetch_one(sa.select(Rooms).where(Rooms.c.id == room_id).with_for_update())
-        if not row:
-            raise HTTPException(404, 'Room not found')
-        changes = body.model_dump(exclude_unset=True)
-        if not changes:
-            return dict(row)
-        return dict(await db.fetch_one(Rooms.update().where(Rooms.c.id == room_id)
-            .values(**changes).returning(*Rooms.c)))
+    try:
+        async with db.transaction():
+            row = await db.fetch_one(sa.select(Rooms).where(Rooms.c.id == room_id).with_for_update())
+            if not row:
+                raise HTTPException(404, 'Room not found')
+            changes = body.model_dump(exclude_unset=True)
+            if not changes:
+                return dict(row)
+            return dict(await db.fetch_one(Rooms.update().where(Rooms.c.id == room_id)
+                .values(**changes).returning(*Rooms.c)))
+    except asyncpg.UniqueViolationError:
+        raise ApiError(409, 'room_number_taken', 'Room number already exists')
